@@ -2,6 +2,8 @@
 
 > **Beta／開發中：** 車輛位置包含依官方回報資料所做的短時間推估，不能作為等車或行車安全的唯一依據。
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/chen861019/taipei-bus-live)
+
 獨立、輕量的台北公車即時地圖。這是重新撰寫的專案，只參考即時交通地圖的互動概念，
 不包含台鐵、高鐵、捷運班表、3D 模型、音樂或軌島的程式碼與品牌資產。
 
@@ -31,7 +33,7 @@ npm start
 
 ## 部署到 Render
 
-專案包含 `render.yaml`，可直接建立免費的 Render Web Service。部署完成後會取得公開的
+點選上方 **Deploy to Render**，即可使用 `render.yaml` 建立免費的 Render Web Service。部署完成後會取得公開的
 `onrender.com` HTTPS 網址；後續推送到 GitHub 的 `main` 分支時會自動重新部署。
 
 免費服務閒置一段時間後會休眠，第一次開啟可能需要等待服務喚醒。
