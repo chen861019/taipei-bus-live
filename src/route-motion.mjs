@@ -52,6 +52,12 @@ export function buildShapeIndex(rows = []) {
   return index;
 }
 
+export function routeTrackCoordinates(shapeIndex, routeId, direction) {
+  const track = shapeIndex.get(`main:${routeId}:${Number(direction)}`);
+  if (!track) return [];
+  return Array.from(track.longitude, (lon, index) => [lon, track.latitude[index]]);
+}
+
 function angularDifference(a, b) {
   return Math.abs(((a - b + 540) % 360) - 180);
 }

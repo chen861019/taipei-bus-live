@@ -76,6 +76,13 @@
         <div class="wide"><dt>位置狀態</dt><dd id="busMotionDetail">—</dd></div>
         <div class="wide"><dt>系統檢查</dt><dd id="busChecked">—</dd></div>
       </dl>
+      <div class="route-stops-panel" id="routeStopsPanel" aria-live="polite" aria-atomic="true" aria-busy="false">
+        <div>
+          <strong>路線站牌</strong>
+          <span id="routeStopsStatus">選取公車後載入該方向站牌</span>
+        </div>
+        <button id="fitRouteButton" type="button" hidden>顯示全線</button>
+      </div>
       <p class="source-note">移動位置會優先沿官方路線做短時間平滑推估；這是估算位置，實際乘車請以官方回報、站牌與業者資訊為準。</p>
     </section>
 

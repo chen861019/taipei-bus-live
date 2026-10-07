@@ -3,8 +3,9 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
-import { normalizeBusSnapshot, readGzipJson, ROUTE_URL, SHAPE_URL, VEHICLE_URL } from './src/bus-data.mjs';
-import { applyRouteMotion, buildShapeIndex, createRouteMotionModel } from './src/route-motion.mjs';
+import { normalizeBusSnapshot, readGzipJson, ROUTE_URL, SHAPE_URL, STOP_URL, VEHICLE_URL } from './src/bus-data.mjs';
+import { applyRouteMotion, buildShapeIndex, createRouteMotionModel, routeTrackCoordinates } from './src/route-motion.mjs';
+import { buildRouteStopIndex, routeStops } from './src/route-stops.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 5180);
@@ -17,6 +18,8 @@ let routeCache = null;
 let routeInflight = null;
 let shapeCache = null;
 let shapeInflight = null;
+let stopCache = null;
+let stopInflight = null;
 let motionModels = new Map();
 let modeledSnapshotAt = null;
 
@@ -49,6 +52,19 @@ async function currentShapeIndex() {
     return data;
   })().finally(() => { shapeInflight = null; });
   return shapeInflight;
+}
+
+async function currentStopIndex() {
+  if (stopCache && Date.now() - stopCache.cachedAt < ROUTE_CACHE_MS) return stopCache.data;
+  if (stopInflight) return stopInflight;
+  stopInflight = (async () => {
+    const response = await fetch(STOP_URL, { headers: { accept: 'application/gzip, application/json' } });
+    const body = await readGzipJson(response);
+    const data = buildRouteStopIndex(body?.BusInfo);
+    stopCache = { cachedAt: Date.now(), data };
+    return data;
+  })().finally(() => { stopInflight = null; });
+  return stopInflight;
 }
 
 async function currentBuses() {
@@ -116,6 +132,7 @@ async function staticFile(pathname, response) {
 
 const server = createServer(async (request, response) => {
   const url = new URL(request.url, 'http://localhost');
+  const routeStopsMatch = /^\/api\/routes\/(\d+)\/stops$/.exec(url.pathname);
   try {
     if (request.method !== 'GET' && request.method !== 'HEAD') {
       response.writeHead(405, { allow: 'GET, HEAD' }); response.end(); return;
@@ -128,6 +145,25 @@ const server = createServer(async (request, response) => {
         buses: applyRouteMotion(data.buses, motionModels, checkedAtMs),
         checkedAt: new Date(checkedAtMs).toISOString(),
       }, 200, request.headers['accept-encoding']);
+      return;
+    }
+    if (routeStopsMatch) {
+      const directionParam = url.searchParams.get('direction');
+      if (directionParam !== '0' && directionParam !== '1') {
+        sendJson(response, { error: 'direction 必須是 0 或 1。' }, 400, request.headers['accept-encoding']);
+        return;
+      }
+      const direction = Number(directionParam);
+      const routeId = routeStopsMatch[1];
+      const [stopIndex, shapeIndex] = await Promise.all([currentStopIndex(), currentShapeIndex()]);
+      const stops = routeStops(stopIndex, routeId, direction);
+      sendJson(response, {
+        schemaVersion: 1,
+        routeId,
+        direction,
+        stops,
+        shape: routeTrackCoordinates(shapeIndex, routeId, direction),
+      }, stops.length ? 200 : 404, request.headers['accept-encoding']);
       return;
     }
     if (url.pathname === '/api/health') {

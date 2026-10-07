@@ -107,6 +107,14 @@ button { touch-action: manipulation; }
 .bus-facts dt { color: var(--muted); font-size: 11px; }
 .bus-facts dd { margin: 3px 0 0; overflow-wrap: anywhere; color: var(--text); font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .bus-facts dd small { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; font-weight: 550; }
+.route-stops-panel { display: flex; min-height: 60px; margin-top: 12px; padding: 8px 8px 8px 12px; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-muted); }
+.route-stops-panel > div { min-width: 0; }
+.route-stops-panel strong { display: block; color: var(--text); font-size: 13px; }
+.route-stops-panel span { display: block; margin-top: 3px; color: var(--muted); font-size: 12px; line-height: 1.4; }
+.route-stops-panel[aria-busy="true"] span { color: var(--primary-strong); }
+.route-stops-panel button { flex: 0 0 auto; min-width: 88px; min-height: 44px; padding: 8px 12px; border: 1px solid #bfdbfe; border-radius: 10px; color: var(--primary-strong); background: #eff6ff; cursor: pointer; font-size: 13px; font-weight: 750; }
+.route-stops-panel button:active { background: #dbeafe; }
+.route-stops-panel button:focus-visible { outline: 3px solid color-mix(in srgb, var(--focus) 55%, transparent); outline-offset: 2px; }
 .source-note { margin: 12px 0 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
 .attribution-note { position: absolute; z-index: 10; right: 72px; bottom: max(24px, calc(env(safe-area-inset-bottom) + 8px)); padding: 5px 8px; border-radius: 6px; color: #334155; background: rgba(255,255,255,.88); font-size: 10px; }
 
@@ -122,6 +130,7 @@ button { touch-action: manipulation; }
 @media (hover: hover) and (pointer: fine) {
   .icon-button:hover, .map-action:hover, .sheet-close:hover { border-color: #b8c7dc; background: var(--surface-muted); }
   .filter-status button:hover { background: #dbeafe; }
+  .route-stops-panel button:hover { border-color: #93c5fd; background: #dbeafe; }
 }
 
 @media (max-width: 640px) {

@@ -9,9 +9,11 @@ import { describeBusMotion, formatRelativeAge } from '/presentation.mjs';
   const EMPTY = { type: 'FeatureCollection', features: [] };
   const REFRESH_MS = 1_000;
   const MOTION_MS = 250;
+  const ROUTE_CACHE_LIMIT = 24;
   const state = {
     buses: [], busById: new Map(), motionGeojson: EMPTY, query: '', refreshTimer: null,
     motionTimer: null, loading: false, selected: null, snapshotAt: null, checkedAt: null,
+    routeGeojson: EMPTY, routeCache: new Map(), routeLoadToken: 0,
   };
 
   const elements = {
@@ -24,6 +26,9 @@ import { describeBusMotion, formatRelativeAge } from '/presentation.mjs';
     sheet: document.getElementById('busSheet'), close: document.getElementById('sheetClose'),
     motionStatus: document.getElementById('busMotionStatus'),
     motionDetail: document.getElementById('busMotionDetail'), age: document.getElementById('busAge'),
+    routeStopsPanel: document.getElementById('routeStopsPanel'),
+    routeStopsStatus: document.getElementById('routeStopsStatus'),
+    fitRoute: document.getElementById('fitRouteButton'),
   };
 
   const map = new maplibregl.Map({
@@ -66,6 +71,32 @@ import { describeBusMotion, formatRelativeAge } from '/presentation.mjs';
       id: 'bus-cluster-count', type: 'symbol', source: 'buses', filter: ['has', 'point_count'],
       layout: { 'text-field': ['get', 'point_count_abbreviated'], 'text-font': ['Noto Sans Regular'], 'text-size': 12 },
       paint: { 'text-color': '#ffffff' },
+    });
+    if (!map.getSource('selected-route')) map.addSource('selected-route', { type: 'geojson', data: state.routeGeojson });
+    if (!map.getLayer('selected-route-line')) map.addLayer({
+      id: 'selected-route-line', type: 'line', source: 'selected-route', filter: ['==', ['geometry-type'], 'LineString'],
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': '#2563eb', 'line-opacity': 0.62,
+        'line-width': ['interpolate', ['linear'], ['zoom'], 10, 2, 15, 5],
+      },
+    });
+    if (!map.getLayer('route-stops')) map.addLayer({
+      id: 'route-stops', type: 'circle', source: 'selected-route', filter: ['==', ['geometry-type'], 'Point'],
+      paint: {
+        'circle-color': '#ffffff',
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 3, 15, 6],
+        'circle-stroke-color': '#2563eb', 'circle-stroke-width': 2,
+      },
+    });
+    if (!map.getLayer('route-stop-labels')) map.addLayer({
+      id: 'route-stop-labels', type: 'symbol', source: 'selected-route', minzoom: 14,
+      filter: ['==', ['geometry-type'], 'Point'],
+      layout: {
+        'text-field': ['get', 'name'], 'text-font': ['Noto Sans Regular'], 'text-size': 12,
+        'text-offset': [0, 1.15], 'text-anchor': 'top', 'text-allow-overlap': false,
+      },
+      paint: { 'text-color': '#1e3a8a', 'text-halo-color': '#ffffff', 'text-halo-width': 1.5 },
     });
     if (!map.getLayer('bus-points')) map.addLayer({
       id: 'bus-points', type: 'circle', source: 'buses', filter: ['!', ['has', 'point_count']],
@@ -154,7 +185,7 @@ import { describeBusMotion, formatRelativeAge } from '/presentation.mjs';
     return Number.isFinite(date.getTime()) ? date.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) : '—';
   }
 
-function updateSummary() {
+  function updateSummary() {
     const routes = new Set(state.buses.map(bus => bus.route));
     elements.count.textContent = state.buses.length.toLocaleString('zh-TW');
     elements.routes.textContent = routes.size.toLocaleString('zh-TW');
@@ -200,7 +231,7 @@ function updateSummary() {
       if (snapshotChanged) {
         state.snapshotAt = body.snapshotAt;
         installLayers();
-  updateSummary();
+        updateSummary();
         applyFilter({ preservePositions: true });
       }
       updateSelectedBus();
@@ -238,6 +269,76 @@ function updateSummary() {
     map.setFilter?.('bus-selected', ['==', ['get', 'id'], state.selected || '']);
   }
 
+  function routeGeojson(body) {
+    const stops = Array.isArray(body?.stops) ? body.stops : [];
+    const shape = Array.isArray(body?.shape) && body.shape.length >= 2
+      ? body.shape
+      : stops.map(stop => [stop.lon, stop.lat]);
+    const features = [];
+    if (shape.length >= 2) features.push({
+      type: 'Feature',
+      geometry: { type: 'LineString', coordinates: shape },
+      properties: { kind: 'route' },
+    });
+    for (const stop of stops) features.push({
+      type: 'Feature', id: `stop-${stop.id}`,
+      geometry: { type: 'Point', coordinates: [stop.lon, stop.lat] },
+      properties: {
+        kind: 'stop', id: stop.id, name: stop.name, sequence: stop.sequence,
+        bearing: stop.bearing || '', address: stop.address || '',
+      },
+    });
+    return { type: 'FeatureCollection', features };
+  }
+
+  function clearRouteStops(message = '選取公車後載入該方向站牌') {
+    state.routeLoadToken += 1;
+    state.routeGeojson = EMPTY;
+    map.getSource('selected-route')?.setData(EMPTY);
+    elements.routeStopsPanel.setAttribute?.('aria-busy', 'false');
+    elements.routeStopsStatus.textContent = message;
+    elements.fitRoute.hidden = true;
+  }
+
+  function showRouteStops(body) {
+    state.routeGeojson = routeGeojson(body);
+    map.getSource('selected-route')?.setData(state.routeGeojson);
+    elements.routeStopsPanel.setAttribute?.('aria-busy', 'false');
+    elements.routeStopsStatus.textContent = `已顯示 ${body.stops.length} 站 · ${body.direction === 0 ? '去程' : '回程'}`;
+    elements.fitRoute.hidden = body.stops.length === 0;
+  }
+
+  async function loadRouteStops(bus) {
+    const token = ++state.routeLoadToken;
+    const routeId = String(bus?.shapeRouteId || '');
+    const direction = bus?.direction === 0 || bus?.direction === 1 ? bus.direction : null;
+    if (!routeId || direction == null) {
+      clearRouteStops('此車目前無法判斷路線方向');
+      return;
+    }
+    const key = `${routeId}:${direction}`;
+    state.routeGeojson = EMPTY;
+    map.getSource('selected-route')?.setData(EMPTY);
+    elements.routeStopsPanel.setAttribute?.('aria-busy', 'true');
+    elements.routeStopsStatus.textContent = '正在載入該方向站牌…';
+    elements.fitRoute.hidden = true;
+    try {
+      let body = state.routeCache.get(key);
+      if (!body) {
+        const response = await fetch(`/api/routes/${encodeURIComponent(routeId)}/stops?direction=${direction}`, { cache: 'force-cache' });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        body = await response.json();
+        if (body.schemaVersion !== 1 || !Array.isArray(body.stops)) throw new Error('資料格式錯誤');
+        if (state.routeCache.size >= ROUTE_CACHE_LIMIT) state.routeCache.delete(state.routeCache.keys().next().value);
+        state.routeCache.set(key, body);
+      }
+      if (token === state.routeLoadToken && state.selected === bus.id) showRouteStops(body);
+    } catch {
+      if (token !== state.routeLoadToken) return;
+      clearRouteStops('站牌資料暫時無法取得，請重新選取');
+    }
+  }
+
   function showBus(bus) {
     if (!bus) return;
     state.selected = bus.id;
@@ -246,6 +347,7 @@ function updateSummary() {
     const wasHidden = elements.sheet.hidden;
     elements.sheet.hidden = false;
     elements.app.dataset.sheetOpen = 'true';
+    loadRouteStops(bus);
     if (wasHidden) elements.close.focus({ preventScroll: true });
   }
 
@@ -254,6 +356,7 @@ function updateSummary() {
     state.selected = null;
     elements.app.dataset.sheetOpen = 'false';
     updateSelectedLayer();
+    clearRouteStops();
     map.getCanvas().focus?.({ preventScroll: true });
   }
 
@@ -276,7 +379,16 @@ function updateSummary() {
     const feature = event.features?.[0]; if (!feature) return;
     showBus(state.buses.find(bus => bus.id === feature.properties.id));
   });
-  for (const layer of ['bus-clusters', 'bus-points']) {
+  map.on('click', 'route-stops', event => {
+    const feature = event.features?.[0]; if (!feature) return;
+    const sequence = feature.properties.sequence ? `${feature.properties.sequence}. ` : '';
+    const address = feature.properties.address ? `\n${feature.properties.address}` : '';
+    new maplibregl.Popup({ closeButton: false, offset: 12 })
+      .setLngLat(feature.geometry.coordinates)
+      .setText(`${sequence}${feature.properties.name}${address}`)
+      .addTo(map);
+  });
+  for (const layer of ['bus-clusters', 'bus-points', 'route-stops']) {
     map.on('mouseenter', layer, () => { map.getCanvas().style.cursor = 'pointer'; });
     map.on('mouseleave', layer, () => { map.getCanvas().style.cursor = ''; });
   }
@@ -297,6 +409,13 @@ function updateSummary() {
     refresh({ showIndicator: true });
   });
   elements.close.addEventListener('click', closeSheet);
+  elements.fitRoute.addEventListener('click', () => {
+    const points = state.routeGeojson.features.filter(feature => feature.geometry.type === 'Point');
+    if (!points.length) return;
+    const bounds = new maplibregl.LngLatBounds();
+    points.forEach(feature => bounds.extend(feature.geometry.coordinates));
+    map.fitBounds(bounds, { padding: 72, maxZoom: 15, duration: prefersReducedMotion() ? 0 : 450 });
+  });
   document.addEventListener('keydown', event => { if (event.key === 'Escape' && !elements.sheet.hidden) closeSheet(); });
   elements.locate.addEventListener('click', () => {
     if (!navigator.geolocation) { elements.status.textContent = '此瀏覽器不支援定位'; return; }

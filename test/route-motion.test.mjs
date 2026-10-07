@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { applyRouteMotion, buildShapeIndex, createRouteMotionModel, predictOnRoute } from '../src/route-motion.mjs';
+import { applyRouteMotion, buildShapeIndex, createRouteMotionModel, predictOnRoute, routeTrackCoordinates } from '../src/route-motion.mjs';
 
 const shapeIndex = buildShapeIndex([{
   RouteID: 10, SubRouteID: -1, GoBack: 0,
@@ -15,6 +15,13 @@ const bus = {
 test('主路線代碼可建立輕量軌跡索引', () => {
   assert.ok(shapeIndex.get('main:10:0'));
   assert.equal(shapeIndex.get('main:10:0').longitude.constructor, Float64Array);
+});
+
+test('可從輕量索引輸出指定方向的地圖線形', () => {
+  assert.deepEqual(routeTrackCoordinates(shapeIndex, 10, 0), [
+    [121.5, 25], [121.501, 25], [121.501, 25.001],
+  ]);
+  assert.deepEqual(routeTrackCoordinates(shapeIndex, 10, 1), []);
 });
 
 test('GPS 先吸附路線，再沿折線而非直線前進', () => {
